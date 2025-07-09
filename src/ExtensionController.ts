@@ -7,7 +7,7 @@ import {
 } from './types';
 import { NetworkService } from './services/NetworkService';
 import { DebugService } from './services/DebugService';
-import { WebviewService } from './services/WebviewService';
+import { WebviewService } from './webview/WebviewProvider';
 import { ConfigService } from './services/ConfigService';
 import { LoggerService } from './services/LoggerService';
 
@@ -25,6 +25,9 @@ export class ExtensionController implements NetworkEventHandler {
 
   private initialize(): void {
     this.logger.info('Initializing Network Interceptor Extension');
+
+    // IMPORTANT: Set the extension URI for the WebviewService
+    this.webviewService.setExtensionUri(this.context.extensionUri);
 
     // Register event handlers
     this.networkService.addEventHandler(this);

@@ -1,680 +1,919 @@
 import * as vscode from 'vscode';
-import { NetworkRequest, WebviewMessage } from '../types';
+import { IWebviewService, WebviewMessage, NetworkRequest } from '../types';
+import { LoggerService } from '../services/LoggerService';
 
-export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
-  private _view?: vscode.WebviewView;
-  private requests: NetworkRequest[] = [];
+export class WebviewService implements IWebviewService {
+  private static instance: WebviewService;
+  private webviewPanel: vscode.WebviewPanel | undefined;
+  private readonly logger = LoggerService.getInstance();
+  private readonly messageCallbacks: Set<(message: WebviewMessage) => void> =
+    new Set();
+  private extensionUri: vscode.Uri | undefined;
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  private constructor() {}
 
-  public resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    context: vscode.WebviewViewResolveContext,
-    token: vscode.CancellationToken
-  ): void {
-    this._view = webviewView;
+  public static getInstance(): WebviewService {
+    if (!WebviewService.instance) {
+      WebviewService.instance = new WebviewService();
+    }
+    return WebviewService.instance;
+  }
 
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, 'out'),
-        vscode.Uri.joinPath(this.context.extensionUri, 'src', 'ui'),
-      ],
-    };
+  public setExtensionUri(uri: vscode.Uri): void {
+    this.extensionUri = uri;
+  }
 
-    webviewView.webview.html = this.generateHtmlContent(webviewView.webview);
+  public get isVisible(): boolean {
+    return this.webviewPanel?.visible ?? false;
+  }
 
-    webviewView.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => this.handleWebviewMessage(message),
-      undefined,
-      this.context.subscriptions
+  public show(): void {
+    if (this.webviewPanel) {
+      this.webviewPanel.reveal(vscode.ViewColumn.Two);
+      return;
+    }
+
+    this.createWebviewPanel();
+  }
+
+  public hide(): void {
+    if (this.webviewPanel) {
+      this.webviewPanel.dispose();
+    }
+  }
+
+  public postMessage(message: WebviewMessage): void {
+    if (!this.webviewPanel) {
+      this.logger.warn('Attempted to post message to non-existent webview');
+      return;
+    }
+
+    this.webviewPanel.webview.postMessage(message).then(
+      () => this.logger.debug('Message posted to webview', message),
+      (error) => this.logger.error('Failed to post message to webview', error)
     );
   }
 
-  public createPanel(): vscode.WebviewPanel {
-    const panel = vscode.window.createWebviewPanel(
+  public onMessage(callback: (message: WebviewMessage) => void): void {
+    this.messageCallbacks.add(callback);
+  }
+
+  public updateRequests(requests: readonly NetworkRequest[]): void {
+    this.postMessage({
+      type: 'updateRequests',
+      data: requests,
+    });
+  }
+
+  private createWebviewPanel(): void {
+    this.webviewPanel = vscode.window.createWebviewPanel(
       'networkInterceptor',
       'Network Requests',
       vscode.ViewColumn.Two,
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(this.context.extensionUri, 'out'),
-          vscode.Uri.joinPath(this.context.extensionUri, 'src', 'ui'),
-        ],
+        localResourceRoots: this.extensionUri ? [this.extensionUri] : [],
       }
     );
 
-    panel.webview.html = this.generateHtmlContent(panel.webview);
-
-    panel.webview.postMessage({
-      type: 'updateRequests',
-      data: this.requests,
-    });
-
-    panel.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => this.handleWebviewMessage(message),
-      undefined,
-      this.context.subscriptions
-    );
-
-    return panel;
+    this.setupWebviewContent();
+    this.setupWebviewEventHandlers();
   }
 
-  public updateRequests(requests: NetworkRequest[]): void {
-    this.requests = requests;
-
-    this._view?.webview.postMessage({
-      type: 'updateRequests',
-      data: requests,
-    });
-  }
-
-  public updatePanel(
-    panel: vscode.WebviewPanel,
-    requests: NetworkRequest[]
-  ): void {
-    panel.webview.postMessage({
-      type: 'updateRequests',
-      data: requests,
-    });
-  }
-
-  public clearRequests(): void {
-    this.requests = [];
-
-    this._view?.webview.postMessage({
-      type: 'clear',
-    });
-  }
-
-  public handleWebviewMessage(message: WebviewMessage): void {
-    switch (message.type) {
-      case 'clear':
-        vscode.commands.executeCommand('networkInterceptor.clear');
-        break;
-      case 'export':
-        this.exportRequests();
-        break;
+  private setupWebviewContent(): void {
+    if (!this.webviewPanel) {
+      return;
     }
+
+    this.webviewPanel.webview.html = this.getHtmlContent(
+      this.webviewPanel.webview
+    );
   }
 
-  private async exportRequests(): Promise<void> {
-    const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file('network-requests.json'),
-      filters: {
-        'JSON files': ['json'],
-      },
+  private setupWebviewEventHandlers(): void {
+    if (!this.webviewPanel) {
+      return;
+    }
+
+    // Handle disposal
+    this.webviewPanel.onDidDispose(() => {
+      this.webviewPanel = undefined;
+      this.logger.info('Webview panel disposed');
     });
 
-    if (uri) {
-      const content = JSON.stringify(this.requests, null, 2);
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
-      vscode.window.showInformationMessage(
-        'Network requests exported successfully!'
+    // Handle visibility changes
+    this.webviewPanel.onDidChangeViewState((event) => {
+      this.logger.debug(
+        `Webview visibility changed: ${event.webviewPanel.visible}`
       );
-    }
+    });
+
+    // Handle messages from webview
+    this.webviewPanel.webview.onDidReceiveMessage(
+      (message: WebviewMessage) => {
+        this.logger.debug('Received message from webview', message);
+
+        // Notify all registered callbacks
+        this.messageCallbacks.forEach((callback) => callback(message));
+      },
+      undefined,
+      []
+    );
   }
 
-  private generateHtmlContent(webview: vscode.Webview): string {
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(
-        this.context.extensionUri,
-        'src',
-        'ui',
-        'styles',
-        'networkPanel.css'
-      )
-    );
+  private getHtmlContent(webview: vscode.Webview): string {
+    const nonce = this.getNonce();
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Network Requests</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <title>Network Interceptor</title>
     <style>
         :root {
-          --primary-color: #007acc;
-          --success-color: #28a745;
-          --warning-color: #ffc107;
-          --error-color: #dc3545;
-          --info-color: #17a2b8;
-          --border-color: var(--vscode-panel-border);
-          --bg-color: var(--vscode-editor-background);
-          --text-color: var(--vscode-editor-foreground);
-          --hover-color: var(--vscode-list-hoverBackground);
+            --bg-color: var(--vscode-editor-background);
+            --text-color: var(--vscode-editor-foreground);
+            --border-color: var(--vscode-panel-border);
+            --hover-bg: var(--vscode-list-hoverBackground);
+            --button-bg: var(--vscode-button-background);
+            --button-fg: var(--vscode-button-foreground);
+            --button-hover-bg: var(--vscode-button-hoverBackground);
+            --error-color: var(--vscode-editorError-foreground);
+            --warning-color: var(--vscode-editorWarning-foreground);
+            --success-color: var(--vscode-terminal-ansiGreen);
+            --link-color: var(--vscode-textLink-foreground);
         }
 
         * {
-          box-sizing: border-box;
+            box-sizing: border-box;
         }
 
         body {
-          font-family: var(--vscode-font-family);
-          font-size: var(--vscode-font-size);
-          color: var(--text-color);
-          background-color: var(--bg-color);
-          margin: 0;
-          padding: 0;
-          overflow: hidden;
+            margin: 0;
+            padding: 0;
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--text-color);
+            background: var(--bg-color);
         }
 
         .toolbar {
-          display: flex;
-          align-items: center;
-          padding: 10px;
-          border-bottom: 1px solid var(--border-color);
-          background: var(--vscode-panel-background);
-          gap: 10px;
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            align-items: center;
+        }
+
+        .spacer {
+            flex-grow: 1;
         }
 
         .btn {
-          padding: 6px 12px;
-          border: none;
-          border-radius: 3px;
-          cursor: pointer;
-          font-size: 12px;
-          transition: background-color 0.2s;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.2s;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .btn-primary {
-          background: var(--primary-color);
-          color: white;
+            background: var(--button-bg);
+            color: var(--button-fg);
         }
 
-        .btn-primary:hover {
-          background: #005a9e;
+        .btn-primary:hover:not(:disabled) {
+            background: var(--button-hover-bg);
         }
 
         .btn-secondary {
-          background: var(--vscode-button-secondaryBackground);
-          color: var(--vscode-button-secondaryForeground);
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
         }
 
-        .btn-secondary:hover {
-          background: var(--vscode-button-secondaryHoverBackground);
-        }
-
-        .counter {
-          margin-left: auto;
-          font-size: 12px;
-          color: var(--vscode-descriptionForeground);
-        }
-
-        .json-controls {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 8px;
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--vscode-button-secondaryHoverBackground);
         }
 
         .btn-sm {
-          padding: 2px 6px;
-          font-size: 11px;
+            padding: 4px 8px;
+            font-size: 11px;
         }
 
-        .requests-container {
-          height: calc(100vh - 50px);
-          overflow: auto;
+        .counter {
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
         }
 
-        #requestsTable {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 12px;
+        .filters {
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
         }
 
-        #requestsTable th {
-          background: var(--vscode-panel-background);
-          padding: 8px;
-          text-align: left;
-          border-bottom: 1px solid var(--border-color);
-          font-weight: 600;
-          position: sticky;
-          top: 0;
-          z-index: 10;
+        .filter-input, .filter-select {
+            padding: 4px 8px;
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 3px;
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            font-size: 12px;
         }
 
-        .request-row {
-          cursor: pointer;
-          transition: background-color 0.2s;
+        .filter-input {
+            flex-grow: 1;
+            min-width: 200px;
         }
 
-        .request-row:hover {
-          background: var(--hover-color);
+        .table-container {
+            flex-grow: 1;
+            overflow: auto;
+            height: calc(100vh - 120px);
         }
 
-        .request-row td {
-          padding: 8px;
-          border-bottom: 1px solid var(--border-color);
+        .requests-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .requests-table th {
+            background: var(--vscode-editor-background);
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .requests-table td {
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .requests-table tr:hover {
+            background: var(--hover-bg);
+            cursor: pointer;
         }
 
         .method {
-          font-weight: bold;
-          padding: 2px 6px;
-          border-radius: 3px;
-          font-size: 10px;
-          text-transform: uppercase;
+            font-weight: bold;
+            text-transform: uppercase;
         }
 
-        .method.get { background: var(--success-color); color: white; }
-        .method.post { background: var(--primary-color); color: white; }
-        .method.put { background: var(--warning-color); color: black; }
-        .method.delete { background: var(--error-color); color: white; }
-        .method.patch { background: var(--info-color); color: white; }
-
-        .url-cell {
-          max-width: 300px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
+        .method-GET { color: var(--success-color); }
+        .method-POST { color: var(--link-color); }
+        .method-PUT { color: var(--warning-color); }
+        .method-DELETE { color: var(--error-color); }
+        .method-PATCH { color: var(--vscode-terminal-ansiCyan); }
 
         .status {
-          font-weight: bold;
-          padding: 2px 6px;
-          border-radius: 3px;
-          font-size: 10px;
+            font-weight: bold;
         }
 
-        .status.success { background: var(--success-color); color: white; }
-        .status.client-error { background: var(--warning-color); color: black; }
-        .status.server-error { background: var(--error-color); color: white; }
-        .status.info { background: var(--info-color); color: white; }
-        .status.error { background: var(--error-color); color: white; }
-        .status.pending { background: #6c757d; color: white; }
+        .status-2xx { color: var(--success-color); }
+        .status-3xx { color: var(--link-color); }
+        .status-4xx { color: var(--warning-color); }
+        .status-5xx { color: var(--error-color); }
 
-        .modal {
-          display: none;
-          position: fixed;
-          z-index: 1000;
-          left: 0;
-          top: 0;
-          width: 100%;
-          height: 100%;
-          background-color: rgba(0,0,0,0.5);
+        .empty-state {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .empty-state.visible {
+            display: block;
+        }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .modal-overlay.visible {
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .modal-content {
-          background-color: var(--bg-color);
-          margin: 5% auto;
-          padding: 0;
-          border: 1px solid var(--border-color);
-          width: 80%;
-          max-width: 800px;
-          max-height: 80vh;
-          border-radius: 6px;
-          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
 
         .modal-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 15px 20px;
-          border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
         }
 
         .modal-header h2 {
-          margin: 0;
-          font-size: 18px;
+            margin: 0;
+            font-size: 18px;
         }
 
-        .close {
-          font-size: 28px;
-          font-weight: bold;
-          cursor: pointer;
-          color: var(--vscode-descriptionForeground);
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .close:hover {
-          color: var(--text-color);
+        .modal-close:hover {
+            color: var(--text-color);
         }
 
         .modal-body {
-          padding: 20px;
-          max-height: 60vh;
-          overflow-y: auto;
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
         }
 
         .detail-section {
-          margin-bottom: 20px;
+            margin-bottom: 20px;
         }
 
         .detail-section h3 {
-          margin: 0 0 10px 0;
-          font-size: 16px;
-          color: var(--primary-color);
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: var(--vscode-textLink-foreground);
         }
 
-        .detail-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 10px;
-          margin-bottom: 10px;
+        .detail-content {
+            background: var(--vscode-editor-background);
+            padding: 10px;
+            border-radius: 3px;
         }
 
-        .detail-item {
-          display: flex;
-          justify-content: space-between;
-          padding: 5px 0;
+        .info-row {
+            display: flex;
+            padding: 4px 0;
         }
 
-        .detail-item .label {
-          font-weight: bold;
-          color: var(--vscode-descriptionForeground);
+        .info-label {
+            font-weight: bold;
+            color: var(--vscode-descriptionForeground);
+            min-width: 100px;
         }
 
-        .detail-item .value {
-          color: var(--text-color);
-          word-break: break-all;
+        .info-value {
+            color: var(--text-color);
+            word-break: break-all;
+            flex: 1;
+        }
+
+        .json-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
         }
 
         .code-block {
-          background: var(--vscode-textCodeBlock-background);
-          border: 1px solid var(--border-color);
-          padding: 10px;
-          border-radius: 4px;
-          overflow-x: auto;
-          font-family: var(--vscode-editor-font-family);
-          font-size: 12px;
-          line-height: 1.4;
+            background: var(--vscode-textCodeBlock-background);
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            font-family: var(--vscode-editor-font-family);
+            font-size: 12px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
         .error-message {
-          background: rgba(220, 53, 69, 0.1);
-          border: 1px solid var(--error-color);
-          color: var(--error-color);
-          padding: 10px;
-          border-radius: 4px;
-          font-family: var(--vscode-editor-font-family);
+            background: rgba(220, 53, 69, 0.1);
+            border: 1px solid var(--error-color);
+            color: var(--error-color);
+            padding: 10px;
+            border-radius: 4px;
+            font-family: var(--vscode-editor-font-family);
         }
 
-        ::-webkit-scrollbar {
-          width: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-          background: var(--vscode-scrollbar-shadow);
-        }
-
-        ::-webkit-scrollbar-thumb {
-          background: var(--vscode-scrollbarSlider-background);
-          border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-          background: var(--vscode-scrollbarSlider-hoverBackground);
+        .success-feedback {
+            color: var(--success-color);
         }
     </style>
 </head>
 <body>
-    <div id="app">
-        <div class="toolbar">
-            <button id="clearBtn" class="btn btn-primary" onclick="clearRequests()">Clear</button>
-            <button id="exportBtn" class="btn btn-secondary" onclick="exportRequests()">Export</button>
-            <button id="autoScrollBtn" class="btn btn-secondary" onclick="toggleAutoScroll()">Auto Scroll: On</button>
-            <span id="requestCount" class="counter">Requests: 0</span>
-        </div>
-        
-        <div class="requests-container">
-            <table id="requestsTable">
-                <thead>
-                    <tr>
-                        <th>Method</th>
-                        <th>URL</th>
-                        <th>Status</th>
-                        <th>Duration</th>
-                        <th>Time</th>
-                    </tr>
-                </thead>
-                <tbody id="requestsBody">
-                </tbody>
-            </table>
-        </div>
+    <div class="toolbar">
+        <button id="clear-btn" class="btn btn-primary">Clear</button>
+        <button id="export-btn" class="btn btn-secondary">Export</button>
+        <button id="auto-scroll-btn" class="btn btn-secondary">Auto Scroll: On</button>
+        <div class="spacer"></div>
+        <div id="request-count" class="counter">0 requests</div>
     </div>
 
-    <div id="modal" class="modal">
-        <div class="modal-content">
+    <div class="filters">
+        <input type="text" id="url-filter" class="filter-input" placeholder="Filter by URL...">
+        <select id="method-filter" class="filter-select">
+            <option value="">All Methods</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="DELETE">DELETE</option>
+            <option value="PATCH">PATCH</option>
+        </select>
+        <select id="status-filter" class="filter-select">
+            <option value="">All Status</option>
+            <option value="2xx">2xx Success</option>
+            <option value="3xx">3xx Redirect</option>
+            <option value="4xx">4xx Client Error</option>
+            <option value="5xx">5xx Server Error</option>
+        </select>
+    </div>
+
+    <div class="table-container">
+        <table class="requests-table">
+            <thead>
+                <tr>
+                    <th>Method</th>
+                    <th>URL</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody id="requests-tbody">
+            </tbody>
+        </table>
+    </div>
+
+    <div id="empty-state" class="empty-state">
+        <div style="font-size: 48px; margin-bottom: 16px;">🔍</div>
+        <h3>No network requests captured yet</h3>
+        <p>Run your Node.js application to see network requests here.</p>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal-overlay" class="modal-overlay">
+        <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <h2>Request Details</h2>
-                <span id="closeModal" class="close">&times;</span>
+                <h2 id="modal-title">Request Details</h2>
+                <button id="modal-close-btn" class="modal-close">&times;</button>
             </div>
-            <div id="modalBody" class="modal-body"></div>
+            <div id="modal-body" class="modal-body"></div>
         </div>
     </div>
 
-    <script>
-        const vscode = acquireVsCodeApi();
-        let requests = [];
-        let autoScroll = true;
+    <script nonce="${nonce}">
+        (function() {
+            const vscode = acquireVsCodeApi();
+            
+            let requests = [];
+            let filteredRequests = [];
+            let autoScroll = true;
 
-        document.getElementById('closeModal').addEventListener('click', closeModal);
+            // DOM Elements
+            const elements = {
+                clearBtn: document.getElementById('clear-btn'),
+                exportBtn: document.getElementById('export-btn'),
+                autoScrollBtn: document.getElementById('auto-scroll-btn'),
+                modalCloseBtn: document.getElementById('modal-close-btn'),
+                modalOverlay: document.getElementById('modal-overlay'),
+                urlFilter: document.getElementById('url-filter'),
+                methodFilter: document.getElementById('method-filter'),
+                statusFilter: document.getElementById('status-filter'),
+                requestsTbody: document.getElementById('requests-tbody'),
+                emptyState: document.getElementById('empty-state'),
+                requestsTable: document.querySelector('.requests-table'),
+                requestCount: document.getElementById('request-count'),
+                modalTitle: document.getElementById('modal-title'),
+                modalBody: document.getElementById('modal-body')
+            };
 
-        function copyToClipboard(text) {
-            navigator.clipboard.writeText(text).then(() => {
-                console.log('Copied to clipboard');
-            });
-        }
-
-        function formatJson(text) {
-            try {
-                const parsed = JSON.parse(text);
-                return JSON.stringify(parsed, null, 2);
-            } catch (e) {
-                return text;
+            // Initialize UI
+            function initializeUI() {
+                // Add event listeners with null checks
+                if (elements.clearBtn) {
+                    elements.clearBtn.addEventListener('click', clearRequests);
+                }
+                
+                if (elements.exportBtn) {
+                    elements.exportBtn.addEventListener('click', exportRequests);
+                }
+                
+                if (elements.autoScrollBtn) {
+                    elements.autoScrollBtn.addEventListener('click', toggleAutoScroll);
+                }
+                
+                if (elements.modalCloseBtn) {
+                    elements.modalCloseBtn.addEventListener('click', closeModal);
+                }
+                
+                if (elements.modalOverlay) {
+                    elements.modalOverlay.addEventListener('click', function(e) {
+                        if (e.target === elements.modalOverlay) {
+                            closeModal();
+                        }
+                    });
+                }
+                
+                // Filter event listeners
+                if (elements.urlFilter) {
+                    elements.urlFilter.addEventListener('input', applyFilters);
+                }
+                
+                if (elements.methodFilter) {
+                    elements.methodFilter.addEventListener('change', applyFilters);
+                }
+                
+                if (elements.statusFilter) {
+                    elements.statusFilter.addEventListener('change', applyFilters);
+                }
+                
+                // Keyboard shortcuts
+                document.addEventListener('keydown', function(event) {
+                    if (event.key === 'Escape') {
+                        closeModal();
+                    }
+                });
+                
+                // Message handling
+                window.addEventListener('message', handleMessage);
             }
-        }
 
-        function createJsonControls(content, containerId) {
-            const isValidJson = (() => {
+            // Event handlers
+            function clearRequests() {
+                vscode.postMessage({ type: 'clear' });
+                requests = [];
+                filteredRequests = [];
+                updateUI();
+            }
+
+            function exportRequests() {
+                if (requests.length === 0) {
+                    vscode.postMessage({ 
+                        type: 'info',
+                        message: 'No requests to export'
+                    });
+                    return;
+                }
+                vscode.postMessage({ type: 'export' });
+            }
+
+            function toggleAutoScroll() {
+                autoScroll = !autoScroll;
+                if (elements.autoScrollBtn) {
+                    elements.autoScrollBtn.textContent = 'Auto Scroll: ' + (autoScroll ? 'On' : 'Off');
+                }
+            }
+
+            function showRequestDetails(index) {
+                const request = filteredRequests[index];
+                if (!request) return;
+                
+                if (elements.modalTitle) {
+                    elements.modalTitle.textContent = request.method + ' ' + new URL(request.url).pathname;
+                }
+                
+                if (elements.modalBody) {
+                    elements.modalBody.innerHTML = generateRequestDetailsHTML(request, index);
+                }
+                
+                if (elements.modalOverlay) {
+                    elements.modalOverlay.classList.add('visible');
+                }
+                
+                // Add event listeners to copy/format buttons
+                setupModalButtonListeners();
+            }
+
+            function closeModal() {
+                if (elements.modalOverlay) {
+                    elements.modalOverlay.classList.remove('visible');
+                }
+            }
+
+            function setupModalButtonListeners() {
+                const copyButtons = document.querySelectorAll('[data-action="copy"]');
+                const formatButtons = document.querySelectorAll('[data-action="format"]');
+                
+                copyButtons.forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const containerId = this.getAttribute('data-container');
+                        copyJsonContent(containerId, this);
+                    });
+                });
+                
+                formatButtons.forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const containerId = this.getAttribute('data-container');
+                        formatJsonContent(containerId);
+                    });
+                });
+            }
+
+            function copyJsonContent(containerId, button) {
+                const element = document.getElementById(containerId);
+                if (element && navigator.clipboard) {
+                    navigator.clipboard.writeText(element.textContent).then(() => {
+                        const originalText = button.textContent;
+                        button.textContent = '✓ Copied!';
+                        button.classList.add('success-feedback');
+                        setTimeout(() => {
+                            button.textContent = originalText;
+                            button.classList.remove('success-feedback');
+                        }, 2000);
+                    }).catch(err => {
+                        console.error('Failed to copy:', err);
+                        vscode.postMessage({ 
+                            type: 'error',
+                            message: 'Failed to copy to clipboard'
+                        });
+                    });
+                }
+            }
+
+            function formatJsonContent(containerId) {
+                const element = document.getElementById(containerId);
+                if (element) {
+                    try {
+                        const parsed = JSON.parse(element.textContent);
+                        element.textContent = JSON.stringify(parsed, null, 2);
+                    } catch (e) {
+                        // Not valid JSON, ignore
+                    }
+                }
+            }
+
+            function generateRequestDetailsHTML(request, index) {
+                let html = '';
+                
+                // General info
+                html += \`
+                    <div class="detail-section">
+                        <h3>General</h3>
+                        <div class="detail-content">
+                            <div class="info-row">
+                                <div class="info-label">Method:</div>
+                                <div class="info-value">\${request.method}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">URL:</div>
+                                <div class="info-value">\${request.url}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Time:</div>
+                                <div class="info-value">\${new Date(request.timestamp).toLocaleString()}</div>
+                            </div>
+                            \${request.duration ? \`<div class="info-row">
+                                <div class="info-label">Duration:</div>
+                                <div class="info-value">\${request.duration}ms</div>
+                            </div>\` : ''}
+                            \${request.responseStatus ? \`<div class="info-row">
+                                <div class="info-label">Status:</div>
+                                <div class="info-value">\${request.responseStatus} \${request.responseStatusText || ''}</div>
+                            </div>\` : ''}
+                        </div>
+                    </div>
+                \`;
+                
+                // Request Headers
+                if (request.requestHeaders && Object.keys(request.requestHeaders).length > 0) {
+                    html += \`
+                        <div class="detail-section">
+                            <h3>Request Headers</h3>
+                            <div class="detail-content">
+                    \`;
+                    for (const [key, value] of Object.entries(request.requestHeaders)) {
+                        html += \`
+                            <div class="info-row">
+                                <div class="info-label">\${escapeHtml(key)}:</div>
+                                <div class="info-value">\${escapeHtml(String(value))}</div>
+                            </div>
+                        \`;
+                    }
+                    html += '</div></div>';
+                }
+                
+                // Request Body
+                if (request.requestBody) {
+                    const bodyId = 'req-body-' + index;
+                    const bodyContent = typeof request.requestBody === 'string' 
+                        ? request.requestBody 
+                        : JSON.stringify(request.requestBody, null, 2);
+                    
+                    html += \`
+                        <div class="detail-section">
+                            <h3>Request Body</h3>
+                            \${createJsonControls(bodyContent, bodyId)}
+                            <pre id="\${bodyId}" class="code-block">\${escapeHtml(bodyContent)}</pre>
+                        </div>
+                    \`;
+                }
+                
+                // Response Headers
+                if (request.responseHeaders && Object.keys(request.responseHeaders).length > 0) {
+                    html += \`
+                        <div class="detail-section">
+                            <h3>Response Headers</h3>
+                            <div class="detail-content">
+                    \`;
+                    for (const [key, value] of Object.entries(request.responseHeaders)) {
+                        html += \`
+                            <div class="info-row">
+                                <div class="info-label">\${escapeHtml(key)}:</div>
+                                <div class="info-value">\${escapeHtml(String(value))}</div>
+                            </div>
+                        \`;
+                    }
+                    html += '</div></div>';
+                }
+                
+                // Response Body
+                if (request.responseBody) {
+                    const bodyId = 'res-body-' + index;
+                    const bodyContent = typeof request.responseBody === 'string' 
+                        ? request.responseBody 
+                        : JSON.stringify(request.responseBody, null, 2);
+                    
+                    html += \`
+                        <div class="detail-section">
+                            <h3>Response Body</h3>
+                            \${createJsonControls(bodyContent, bodyId)}
+                            <pre id="\${bodyId}" class="code-block">\${escapeHtml(bodyContent)}</pre>
+                        </div>
+                    \`;
+                }
+                
+                // Error
+                if (request.error) {
+                    html += \`
+                        <div class="detail-section">
+                            <h3>Error</h3>
+                            <div class="error-message">\${escapeHtml(request.error)}</div>
+                        </div>
+                    \`;
+                }
+                
+                return html;
+            }
+
+            function createJsonControls(content, containerId) {
                 try {
                     JSON.parse(content);
-                    return true;
+                    return \`
+                        <div class="json-controls">
+                            <button class="btn btn-secondary btn-sm" data-container="\${containerId}" data-action="copy">📋 Copy</button>
+                            <button class="btn btn-secondary btn-sm" data-container="\${containerId}" data-action="format">✨ Format</button>
+                        </div>
+                    \`;
                 } catch (e) {
-                    return false;
+                    return ''; // Not valid JSON
                 }
-            })();
-
-            if (!isValidJson) {
-                return '';
             }
 
-            return \`
-                <div class="json-controls">
-                    <button class="btn btn-secondary btn-sm" onclick="copyJsonContent('\${containerId}')">📋 Copy</button>
-                    <button class="btn btn-secondary btn-sm" onclick="formatJsonContent('\${containerId}')">✨ Format</button>
-                </div>
-            \`;
-        }
-
-        function copyJsonContent(containerId) {
-            const element = document.getElementById(containerId);
-            if (element) {
-                copyToClipboard(element.textContent);
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
             }
-        }
 
-        function formatJsonContent(containerId) {
-            const element = document.getElementById(containerId);
-            if (element) {
-                const formatted = formatJson(element.textContent);
-                element.textContent = formatted;
+            function applyFilters() {
+                const urlFilter = (elements.urlFilter?.value || '').toLowerCase();
+                const methodFilter = elements.methodFilter?.value || '';
+                const statusFilter = elements.statusFilter?.value || '';
+                
+                filteredRequests = requests.filter(req => {
+                    const urlMatch = !urlFilter || req.url.toLowerCase().includes(urlFilter);
+                    const methodMatch = !methodFilter || req.method === methodFilter;
+                    let statusMatch = true;
+                    
+                    if (statusFilter && req.responseStatus) {
+                        const statusCode = req.responseStatus;
+                        if (statusFilter === '2xx') statusMatch = statusCode >= 200 && statusCode < 300;
+                        else if (statusFilter === '3xx') statusMatch = statusCode >= 300 && statusCode < 400;
+                        else if (statusFilter === '4xx') statusMatch = statusCode >= 400 && statusCode < 500;
+                        else if (statusFilter === '5xx') statusMatch = statusCode >= 500 && statusCode < 600;
+                    }
+                    
+                    return urlMatch && methodMatch && statusMatch;
+                });
+                
+                updateUI();
             }
-        }
 
-        window.addEventListener('message', event => {
-            const message = event.data;
-            switch (message.type) {
-                case 'updateRequests':
-                    requests = message.data;
-                    updateRequestsTable();
-                    break;
-                case 'clear':
-                    requests = [];
-                    updateRequestsTable();
-                    break;
-            }
-        });
-
-        function updateRequestsTable() {
-            const tbody = document.getElementById('requestsBody');
-            tbody.innerHTML = '';
-
-            requests.forEach((request, index) => {
-                const row = tbody.insertRow();
-                row.className = 'request-row';
-                row.onclick = () => showRequestDetails(index);
-
-                const methodCell = row.insertCell(0);
-                methodCell.innerHTML = \`<span class="method \${request.method.toLowerCase()}">\${request.method}</span>\`;
-
-                const urlCell = row.insertCell(1);
-                urlCell.textContent = request.url;
-                urlCell.className = 'url-cell';
-
-                const statusCell = row.insertCell(2);
-                if (request.error) {
-                    statusCell.innerHTML = '<span class="status error">Error</span>';
-                } else if (request.responseStatus) {
-                    const statusClass = getStatusClass(request.responseStatus);
-                    statusCell.innerHTML = \`<span class="status \${statusClass}">\${request.responseStatus}</span>\`;
+            function updateUI() {
+                // Update counter
+                if (elements.requestCount) {
+                    elements.requestCount.textContent = filteredRequests.length + ' request' + (filteredRequests.length !== 1 ? 's' : '');
+                }
+                
+                // Toggle empty state
+                if (requests.length === 0) {
+                    if (elements.requestsTable) elements.requestsTable.style.display = 'none';
+                    if (elements.emptyState) elements.emptyState.classList.add('visible');
                 } else {
-                    statusCell.innerHTML = '<span class="status pending">Pending</span>';
+                    if (elements.requestsTable) elements.requestsTable.style.display = 'table';
+                    if (elements.emptyState) elements.emptyState.classList.remove('visible');
                 }
-
-                const durationCell = row.insertCell(3);
-                durationCell.textContent = request.duration ? \`\${request.duration}ms\` : '-';
-
-                const timeCell = row.insertCell(4);
-                timeCell.textContent = new Date(request.timestamp).toLocaleTimeString();
-            });
-
-            document.getElementById('requestCount').textContent = \`Requests: \${requests.length}\`;
-            
-            // Auto-scroll to bottom if enabled
-            if (autoScroll) {
-                const container = document.querySelector('.requests-container');
-                container.scrollTop = container.scrollHeight;
+                
+                // Clear table
+                if (elements.requestsTbody) {
+                    elements.requestsTbody.innerHTML = '';
+                    
+                    // Add rows
+                    filteredRequests.forEach((request, index) => {
+                        const row = document.createElement('tr');
+                        row.onclick = () => showRequestDetails(index);
+                        
+                        const methodClass = 'method method-' + request.method;
+                        const statusClass = request.responseStatus ? 
+                            'status status-' + Math.floor(request.responseStatus / 100) + 'xx' : 'status';
+                        
+                        row.innerHTML = \`
+                            <td class="\${methodClass}">\${request.method}</td>
+                            <td>\${new URL(request.url).pathname}</td>
+                            <td class="\${statusClass}">\${request.responseStatus || '-'}</td>
+                            <td>\${request.duration ? request.duration + 'ms' : '-'}</td>
+                            <td>\${new Date(request.timestamp).toLocaleTimeString()}</td>
+                        \`;
+                        
+                        elements.requestsTbody.appendChild(row);
+                    });
+                    
+                    // Auto scroll
+                    if (autoScroll && filteredRequests.length > 0 && elements.requestsTbody.lastElementChild) {
+                        elements.requestsTbody.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+                    }
+                }
             }
-        }
 
-        function getStatusClass(status) {
-            if (status >= 200 && status < 300) return 'success';
-            if (status >= 400 && status < 500) return 'client-error';
-            if (status >= 500) return 'server-error';
-            return 'info';
-        }
-
-        function showRequestDetails(index) {
-            const request = requests[index];
-            const modalBody = document.getElementById('modalBody');
-            
-            modalBody.innerHTML = \`
-                <div class="detail-section">
-                    <h3>General Information</h3>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <span class="label">Method:</span>
-                            <span class="value">\${request.method}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="label">URL:</span>
-                            <span class="value">\${request.url}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="label">Timestamp:</span>
-                            <span class="value">\${new Date(request.timestamp).toLocaleString()}</span>
-                        </div>
-                        \${request.duration ? \`
-                        <div class="detail-item">
-                            <span class="label">Duration:</span>
-                            <span class="value">\${request.duration}ms</span>
-                        </div>
-                        \` : ''}
-                    </div>
-                </div>
-
-                <div class="detail-section">
-                    <h3>Request Headers</h3>
-                    \${createJsonControls(JSON.stringify(request.headers, null, 2), 'req-headers-' + index)}
-                    <pre id="req-headers-\${index}" class="code-block">\${JSON.stringify(request.headers, null, 2)}</pre>
-                </div>
-
-                \${request.requestBody ? \`
-                <div class="detail-section">
-                    <h3>Request Body</h3>
-                    \${createJsonControls(typeof request.requestBody === 'string' ? request.requestBody : JSON.stringify(request.requestBody, null, 2), 'req-body-' + index)}
-                    <pre id="req-body-\${index}" class="code-block">\${typeof request.requestBody === 'string' ? request.requestBody : JSON.stringify(request.requestBody, null, 2)}</pre>
-                </div>
-                \` : ''}
-
-                \${request.responseStatus ? \`
-                <div class="detail-section">
-                    <h3>Response</h3>
-                    <div class="detail-item">
-                        <span class="label">Status:</span>
-                        <span class="value status \${getStatusClass(request.responseStatus)}">\${request.responseStatus}</span>
-                    </div>
-                    <h4>Response Headers</h4>
-                    \${createJsonControls(JSON.stringify(request.responseHeaders, null, 2), 'res-headers-' + index)}
-                    <pre id="res-headers-\${index}" class="code-block">\${JSON.stringify(request.responseHeaders, null, 2)}</pre>
-                </div>
-                \` : ''}
-
-                \${request.responseBody ? \`
-                <div class="detail-section">
-                    <h3>Response Body</h3>
-                    \${createJsonControls(typeof request.responseBody === 'string' ? request.responseBody : JSON.stringify(request.responseBody, null, 2), 'res-body-' + index)}
-                    <pre id="res-body-\${index}" class="code-block">\${typeof request.responseBody === 'string' ? request.responseBody : JSON.stringify(request.responseBody, null, 2)}</pre>
-                </div>
-                \` : ''}
-
-                \${request.error ? \`
-                <div class="detail-section">
-                    <h3>Error</h3>
-                    <div class="error-message">\${request.error}</div>
-                </div>
-                \` : ''}
-            \`;
-
-            document.getElementById('modal').style.display = 'block';
-        }
-
-        function closeModal() {
-            document.getElementById('modal').style.display = 'none';
-        }
-
-        // Close modal when clicking outside
-        document.getElementById('modal').addEventListener('click', (e) => {
-            if (e.target === e.currentTarget) {
-                closeModal();
+            function handleMessage(event) {
+                const message = event.data;
+                switch (message.type) {
+                    case 'updateRequests':
+                        requests = message.data || [];
+                        applyFilters(); // This will also update UI
+                        break;
+                    case 'clear':
+                        requests = [];
+                        filteredRequests = [];
+                        updateUI();
+                        break;
+                }
             }
-        });
 
-        // Handle keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                closeModal();
-            }
-        });
-        
-        // Make functions globally accessible
-        window.clearRequests = () => vscode.postMessage({ type: 'clear' });
-        window.exportRequests = () => vscode.postMessage({ type: 'export' });
-        window.toggleAutoScroll = () => {
-            autoScroll = !autoScroll;
-            document.getElementById('autoScrollBtn').textContent = \`Auto Scroll: \${autoScroll ? 'On' : 'Off'}\`;
-        };
-        window.showRequestDetails = showRequestDetails;
-        window.closeModal = closeModal;
-        window.copyJsonContent = copyJsonContent;
-        window.formatJsonContent = formatJsonContent;
-
-        updateRequestsTable();
+            // Initialize
+            initializeUI();
+            updateUI();
+        })();
     </script>
 </body>
 </html>`;
+  }
+
+  private getNonce(): string {
+    let text = '';
+    const possible =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+      text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+  }
+
+  public dispose(): void {
+    if (this.webviewPanel) {
+      this.webviewPanel.dispose();
+      this.webviewPanel = undefined;
+    }
+    this.messageCallbacks.clear();
   }
 }
