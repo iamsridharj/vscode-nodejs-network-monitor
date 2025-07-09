@@ -1,0 +1,179 @@
+{
+  "name": "vscode-network-interceptor",
+  "displayName": "Network Interceptor",
+  "description": "Intercept and monitor network requests in VS Code debugging sessions",
+  "version": "1.0.0",
+  "publisher": "your-publisher",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "network",
+    "interceptor",
+    "debug",
+    "http",
+    "monitoring"
+  ],
+  "activationEvents": [
+    "onDebugInitialConfigurations",
+    "onDebugResolve",
+    "onCommand:networkInterceptor.showPanel"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "networkInterceptor.showPanel",
+        "title": "Show Network Panel",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.clear",
+        "title": "Clear Requests",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.export",
+        "title": "Export Requests",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.toggleAutoCapture",
+        "title": "Toggle Auto Capture",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.manualInject",
+        "title": "Manual Inject Interceptor",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.forceInject",
+        "title": "Force Inject Interceptor (Debug)",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.showSessionInsights",
+        "title": "Show Session Insights (Monorepo Debug)",
+        "category": "Network Interceptor"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "networkInterceptor.showPanel"
+        },
+        {
+          "command": "networkInterceptor.clear"
+        },
+        {
+          "command": "networkInterceptor.export"
+        },
+        {
+          "command": "networkInterceptor.toggleAutoCapture"
+        },
+        {
+          "command": "networkInterceptor.manualInject"
+        },
+        {
+          "command": "networkInterceptor.forceInject"
+        },
+        {
+          "command": "networkInterceptor.showSessionInsights"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "networkInterceptor.clear",
+          "when": "view == networkInterceptor.requestsView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "networkInterceptor.requestsView",
+          "name": "Network Requests",
+          "when": "networkInterceptor.hasRequests"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Network Interceptor",
+      "properties": {
+        "networkInterceptor.autoCapture": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically capture network requests when debugging starts"
+        },
+        "networkInterceptor.maxRequests": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of requests to keep in memory"
+        },
+        "networkInterceptor.captureBody": {
+          "type": "boolean",
+          "default": true,
+          "description": "Capture request and response bodies"
+        },
+        "networkInterceptor.filterPatterns": {
+          "type": "array",
+          "default": [],
+          "description": "URL patterns to filter out from capture"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "lint:fix": "eslint src --ext ts --fix",
+    "test": "node ./out/test/runTest.js",
+    "test:watch": "npm run test -- --watch",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf out",
+    "prebuild": "npm run clean",
+    "build": "npm run compile",
+    "dev": "npm run watch"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "18.x",
+    "@types/mocha": "^10.0.6",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.2",
+    "mocha": "^10.2.0",
+    "prettier": "^3.1.1",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/vscode-network-interceptor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/vscode-network-interceptor/issues"
+  },
+  "homepage": "https://github.com/your-username/vscode-network-interceptor#readme",
+  "license": "MIT"
+}
