@@ -323,43 +323,146 @@ export class WebviewContentProvider {
         .hidden {
             display: none !important;
         }
+        
+        .json-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .btn {
+            padding: 4px 8px;
+            border: 1px solid var(--vscode-button-border);
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-primary {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        
+        .btn-secondary {
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+        
+        .btn-secondary:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+        
+        .btn-sm {
+            padding: 2px 6px;
+            font-size: 11px;
+        }
+        
+        .spacer {
+            flex-grow: 1;
+        }
+        
+        .counter {
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+            padding: 4px 8px;
+        }
+        
+        .filters {
+            display: flex;
+            gap: 8px;
+            padding: 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            background-color: var(--vscode-panel-background);
+        }
+        
+        .filter-input, .filter-select {
+            padding: 4px 8px;
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 3px;
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            font-size: 12px;
+        }
+        
+        .filter-input {
+            flex-grow: 1;
+            min-width: 200px;
+        }
+        
+        .table-container {
+            flex-grow: 1;
+            overflow: auto;
+        }
+        
+        .code-block {
+            background-color: var(--vscode-textCodeBlock-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            padding: 8px;
+            font-family: var(--vscode-editor-font-family);
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .modal-content {
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            max-width: 90%;
+            max-height: 90%;
+            overflow: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .modal-body {
+            padding: 20px;
+            min-width: 600px;
+        }
     </style>
 </head>
 <body>
     <div class="toolbar">
-        <div class="toolbar-group">
-            <button onclick="clearRequests()">Clear</button>
-            <button onclick="exportRequests()" class="secondary">Export</button>
-            <button onclick="toggleAutoScroll()" class="secondary" id="auto-scroll-btn">Auto Scroll: On</button>
-        </div>
-        
-        <div class="toolbar-group">
-            <input type="text" id="url-filter" placeholder="Filter by URL..." style="width: 200px;">
-            <select id="method-filter">
-                <option value="">All Methods</option>
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="DELETE">DELETE</option>
-                <option value="PATCH">PATCH</option>
-            </select>
-            <select id="status-filter">
-                <option value="">All Status</option>
-                <option value="2xx">2xx Success</option>
-                <option value="3xx">3xx Redirect</option>
-                <option value="4xx">4xx Client Error</option>
-                <option value="5xx">5xx Server Error</option>
-                <option value="error">Error</option>
-            </select>
-        </div>
-        
-        <div class="toolbar-group" style="margin-left: auto;">
-            <div class="status-badge" id="request-count">0 requests</div>
-        </div>
+        <button id="clear-btn" class="btn btn-primary" onclick="clearRequests()">Clear</button>
+        <button id="export-btn" class="btn btn-secondary" onclick="exportRequests()">Export</button>
+        <button id="auto-scroll-btn" class="btn btn-secondary" onclick="toggleAutoScroll()">Auto Scroll: On</button>
+        <div class="spacer"></div>
+        <div id="request-count" class="counter">0 requests</div>
     </div>
-    
-    <div class="requests-container">
-        <table class="requests-table" id="requests-table">
+
+    <div class="filters">
+        <input type="text" id="url-filter" placeholder="Filter by URL..." class="filter-input">
+        <select id="method-filter" class="filter-select">
+            <option value="">All Methods</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="DELETE">DELETE</option>
+            <option value="PATCH">PATCH</option>
+        </select>
+        <select id="status-filter" class="filter-select">
+            <option value="">All Status</option>
+            <option value="2xx">2xx Success</option>
+            <option value="3xx">3xx Redirect</option>
+            <option value="4xx">4xx Client Error</option>
+            <option value="5xx">5xx Server Error</option>
+        </select>
+    </div>
+
+    <div class="table-container">
+        <table id="requests-table" class="requests-table">
             <thead>
                 <tr>
                     <th>Method</th>
@@ -369,28 +472,25 @@ export class WebviewContentProvider {
                     <th>Time</th>
                 </tr>
             </thead>
-            <tbody id="requests-body">
+            <tbody id="requests-tbody">
             </tbody>
         </table>
-        
-        <div class="empty-state hidden" id="empty-state">
-            <div class="empty-state-icon">🌐</div>
-            <div>No network requests captured yet</div>
-            <div style="margin-top: 8px; font-size: 12px; opacity: 0.7;">
-                Start debugging a Node.js application to see requests
-            </div>
-        </div>
     </div>
-    
-    <div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal(event)">
-        <div class="modal" onclick="event.stopPropagation()">
+
+    <div id="empty-state" class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <h3>No network requests captured yet</h3>
+        <p>Run your Node.js application to see network requests here.</p>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+        <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-title" id="modal-title">Request Details</div>
+                <h2 id="modal-title">Request Details</h2>
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
-            <div class="modal-content" id="modal-content">
-                <!-- Content will be populated by JavaScript -->
-            </div>
+            <div id="modal-content" class="modal-body"></div>
         </div>
     </div>
 
@@ -400,6 +500,9 @@ export class WebviewContentProvider {
         let requests = ${JSON.stringify(requests)};
         let filteredRequests = requests;
         let autoScroll = true;
+
+        // Initialize auto-scroll button text
+        document.getElementById('auto-scroll-btn').textContent = \`Auto Scroll: \${autoScroll ? 'On' : 'Off'}\`;
         
         // State management
         function updateUI() {
@@ -442,7 +545,7 @@ export class WebviewContentProvider {
         }
         
         function renderRequests() {
-            const tbody = document.getElementById('requests-body');
+            const tbody = document.getElementById('requests-tbody');
             tbody.innerHTML = '';
             
             filteredRequests.forEach((request, index) => {
@@ -556,6 +659,15 @@ export class WebviewContentProvider {
             btn.textContent = \`Auto Scroll: \${autoScroll ? 'On' : 'Off'}\`;
         }
         
+        // Make functions globally accessible
+        window.clearRequests = clearRequests;
+        window.exportRequests = exportRequests;
+        window.toggleAutoScroll = toggleAutoScroll;
+        window.showRequestDetails = showRequestDetails;
+        window.closeModal = closeModal;
+        window.copyJsonContent = copyJsonContent;
+        window.formatJsonContent = formatJsonContent;
+        
         function showRequestDetails(index) {
             const request = filteredRequests[index];
             if (!request) return;
@@ -573,6 +685,9 @@ export class WebviewContentProvider {
             if (event && event.target !== event.currentTarget) return;
             document.getElementById('modal-overlay').classList.add('hidden');
         }
+        
+        // Close modal when clicking outside
+        document.getElementById('modal-overlay').addEventListener('click', closeModal);
         
         function generateRequestDetailsHTML(request) {
             const sections = [];
@@ -612,45 +727,114 @@ export class WebviewContentProvider {
             
             // Request headers
             if (request.headers && Object.keys(request.headers).length > 0) {
+                const headersContent = JSON.stringify(request.headers, null, 2);
+                const headersId = 'request-headers-' + Date.now();
                 sections.push(\`
                     <div class="detail-section">
                         <h3>Request Headers</h3>
-                        <div class="detail-content">\${JSON.stringify(request.headers, null, 2)}</div>
+                        \${createJsonControls(headersContent, headersId)}
+                        <pre id="\${headersId}" class="detail-content code-block">\${headersContent}</pre>
                     </div>
                 \`);
             }
             
             // Request body
             if (request.requestBody) {
+                const bodyContent = typeof request.requestBody === 'string' ? 
+                    request.requestBody : 
+                    JSON.stringify(request.requestBody, null, 2);
+                const bodyId = 'request-body-' + Date.now();
                 sections.push(\`
                     <div class="detail-section">
                         <h3>Request Body</h3>
-                        <div class="detail-content">\${typeof request.requestBody === 'string' ? request.requestBody : JSON.stringify(request.requestBody, null, 2)}</div>
+                        \${createJsonControls(bodyContent, bodyId)}
+                        <pre id="\${bodyId}" class="detail-content code-block">\${bodyContent}</pre>
                     </div>
                 \`);
             }
             
             // Response headers
             if (request.responseHeaders && Object.keys(request.responseHeaders).length > 0) {
+                const responseHeadersContent = JSON.stringify(request.responseHeaders, null, 2);
+                const responseHeadersId = 'response-headers-' + Date.now();
                 sections.push(\`
                     <div class="detail-section">
                         <h3>Response Headers</h3>
-                        <div class="detail-content">\${JSON.stringify(request.responseHeaders, null, 2)}</div>
+                        \${createJsonControls(responseHeadersContent, responseHeadersId)}
+                        <pre id="\${responseHeadersId}" class="detail-content code-block">\${responseHeadersContent}</pre>
                     </div>
                 \`);
             }
             
             // Response body
             if (request.responseBody) {
+                const responseBodyContent = typeof request.responseBody === 'string' ? 
+                    request.responseBody : 
+                    JSON.stringify(request.responseBody, null, 2);
+                const responseBodyId = 'response-body-' + Date.now();
                 sections.push(\`
                     <div class="detail-section">
                         <h3>Response Body</h3>
-                        <div class="detail-content">\${typeof request.responseBody === 'string' ? request.responseBody : JSON.stringify(request.responseBody, null, 2)}</div>
+                        \${createJsonControls(responseBodyContent, responseBodyId)}
+                        <pre id="\${responseBodyId}" class="detail-content code-block">\${responseBodyContent}</pre>
                     </div>
                 \`);
             }
             
             return sections.join('');
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Could add a toast notification here
+                console.log('Copied to clipboard');
+            });
+        }
+
+        function formatJson(text) {
+            try {
+                const parsed = JSON.parse(text);
+                return JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                return text; // Return original if not valid JSON
+            }
+        }
+
+        function createJsonControls(content, containerId) {
+            const isValidJson = (() => {
+                try {
+                    JSON.parse(content);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            })();
+
+            if (!isValidJson) {
+                return ''; // No controls for non-JSON content
+            }
+
+            return \`
+                <div class="json-controls">
+                    <button class="btn btn-secondary btn-sm" onclick="copyJsonContent('\${containerId}')">📋 Copy</button>
+                    <button class="btn btn-secondary btn-sm" onclick="formatJsonContent('\${containerId}')">✨ Format</button>
+                </div>
+            \`;
+        }
+
+        function copyJsonContent(containerId) {
+            const element = document.getElementById(containerId);
+            if (element) {
+                copyToClipboard(element.textContent);
+            }
+        }
+
+        function formatJsonContent(containerId) {
+            const element = document.getElementById(containerId);
+            if (element) {
+                const formatted = formatJson(element.textContent);
+                element.textContent = formatted;
+            }
         }
         
         // Filter event listeners
@@ -678,6 +862,9 @@ export class WebviewContentProvider {
             const message = event.data;
             if (message.type === 'updateRequests') {
                 requests = message.data || [];
+                updateUI();
+            } else if (message.type === 'clear') {
+                requests = [];
                 updateUI();
             }
         });

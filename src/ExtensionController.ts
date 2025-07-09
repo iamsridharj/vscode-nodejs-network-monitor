@@ -213,6 +213,7 @@ export class ExtensionController implements NetworkEventHandler {
   private handleClearRequests(): void {
     this.networkService.clearRequests();
     this.webviewService.updateRequests([]);
+    this.webviewService.postMessage({ type: 'clear' });
     vscode.window.showInformationMessage('Network requests cleared');
   }
 

@@ -203,6 +203,17 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
           color: var(--vscode-descriptionForeground);
         }
 
+        .json-controls {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+
+        .btn-sm {
+          padding: 2px 6px;
+          font-size: 11px;
+        }
+
         .requests-container {
           height: calc(100vh - 50px);
           overflow: auto;
@@ -401,8 +412,9 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
 <body>
     <div id="app">
         <div class="toolbar">
-            <button id="clearBtn" class="btn btn-primary">Clear</button>
-            <button id="exportBtn" class="btn btn-secondary">Export</button>
+            <button id="clearBtn" class="btn btn-primary" onclick="clearRequests()">Clear</button>
+            <button id="exportBtn" class="btn btn-secondary" onclick="exportRequests()">Export</button>
+            <button id="autoScrollBtn" class="btn btn-secondary" onclick="toggleAutoScroll()">Auto Scroll: On</button>
             <span id="requestCount" class="counter">Requests: 0</span>
         </div>
         
@@ -436,16 +448,61 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
     <script>
         const vscode = acquireVsCodeApi();
         let requests = [];
-
-        document.getElementById('clearBtn').addEventListener('click', () => {
-            vscode.postMessage({ type: 'clear' });
-        });
-
-        document.getElementById('exportBtn').addEventListener('click', () => {
-            vscode.postMessage({ type: 'export' });
-        });
+        let autoScroll = true;
 
         document.getElementById('closeModal').addEventListener('click', closeModal);
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                console.log('Copied to clipboard');
+            });
+        }
+
+        function formatJson(text) {
+            try {
+                const parsed = JSON.parse(text);
+                return JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                return text;
+            }
+        }
+
+        function createJsonControls(content, containerId) {
+            const isValidJson = (() => {
+                try {
+                    JSON.parse(content);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            })();
+
+            if (!isValidJson) {
+                return '';
+            }
+
+            return \`
+                <div class="json-controls">
+                    <button class="btn btn-secondary btn-sm" onclick="copyJsonContent('\${containerId}')">📋 Copy</button>
+                    <button class="btn btn-secondary btn-sm" onclick="formatJsonContent('\${containerId}')">✨ Format</button>
+                </div>
+            \`;
+        }
+
+        function copyJsonContent(containerId) {
+            const element = document.getElementById(containerId);
+            if (element) {
+                copyToClipboard(element.textContent);
+            }
+        }
+
+        function formatJsonContent(containerId) {
+            const element = document.getElementById(containerId);
+            if (element) {
+                const formatted = formatJson(element.textContent);
+                element.textContent = formatted;
+            }
+        }
 
         window.addEventListener('message', event => {
             const message = event.data;
@@ -495,6 +552,12 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
             });
 
             document.getElementById('requestCount').textContent = \`Requests: \${requests.length}\`;
+            
+            // Auto-scroll to bottom if enabled
+            if (autoScroll) {
+                const container = document.querySelector('.requests-container');
+                container.scrollTop = container.scrollHeight;
+            }
         }
 
         function getStatusClass(status) {
@@ -535,13 +598,15 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
 
                 <div class="detail-section">
                     <h3>Request Headers</h3>
-                    <pre class="code-block">\${JSON.stringify(request.headers, null, 2)}</pre>
+                    \${createJsonControls(JSON.stringify(request.headers, null, 2), 'req-headers-' + index)}
+                    <pre id="req-headers-\${index}" class="code-block">\${JSON.stringify(request.headers, null, 2)}</pre>
                 </div>
 
                 \${request.requestBody ? \`
                 <div class="detail-section">
                     <h3>Request Body</h3>
-                    <pre class="code-block">\${typeof request.requestBody === 'string' ? request.requestBody : JSON.stringify(request.requestBody, null, 2)}</pre>
+                    \${createJsonControls(typeof request.requestBody === 'string' ? request.requestBody : JSON.stringify(request.requestBody, null, 2), 'req-body-' + index)}
+                    <pre id="req-body-\${index}" class="code-block">\${typeof request.requestBody === 'string' ? request.requestBody : JSON.stringify(request.requestBody, null, 2)}</pre>
                 </div>
                 \` : ''}
 
@@ -553,14 +618,16 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
                         <span class="value status \${getStatusClass(request.responseStatus)}">\${request.responseStatus}</span>
                     </div>
                     <h4>Response Headers</h4>
-                    <pre class="code-block">\${JSON.stringify(request.responseHeaders, null, 2)}</pre>
+                    \${createJsonControls(JSON.stringify(request.responseHeaders, null, 2), 'res-headers-' + index)}
+                    <pre id="res-headers-\${index}" class="code-block">\${JSON.stringify(request.responseHeaders, null, 2)}</pre>
                 </div>
                 \` : ''}
 
                 \${request.responseBody ? \`
                 <div class="detail-section">
                     <h3>Response Body</h3>
-                    <pre class="code-block">\${typeof request.responseBody === 'string' ? request.responseBody : JSON.stringify(request.responseBody, null, 2)}</pre>
+                    \${createJsonControls(typeof request.responseBody === 'string' ? request.responseBody : JSON.stringify(request.responseBody, null, 2), 'res-body-' + index)}
+                    <pre id="res-body-\${index}" class="code-block">\${typeof request.responseBody === 'string' ? request.responseBody : JSON.stringify(request.responseBody, null, 2)}</pre>
                 </div>
                 \` : ''}
 
@@ -578,6 +645,32 @@ export class NetworkWebviewProvider implements vscode.WebviewViewProvider {
         function closeModal() {
             document.getElementById('modal').style.display = 'none';
         }
+
+        // Close modal when clicking outside
+        document.getElementById('modal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) {
+                closeModal();
+            }
+        });
+
+        // Handle keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+        
+        // Make functions globally accessible
+        window.clearRequests = () => vscode.postMessage({ type: 'clear' });
+        window.exportRequests = () => vscode.postMessage({ type: 'export' });
+        window.toggleAutoScroll = () => {
+            autoScroll = !autoScroll;
+            document.getElementById('autoScrollBtn').textContent = \`Auto Scroll: \${autoScroll ? 'On' : 'Off'}\`;
+        };
+        window.showRequestDetails = showRequestDetails;
+        window.closeModal = closeModal;
+        window.copyJsonContent = copyJsonContent;
+        window.formatJsonContent = formatJsonContent;
 
         updateRequestsTable();
     </script>
