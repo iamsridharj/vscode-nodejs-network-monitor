@@ -47,6 +47,16 @@
         "category": "Network Interceptor"
       },
       {
+        "command": "networkInterceptor.startCapture",
+        "title": "Start Capture",
+        "category": "Network Interceptor"
+      },
+      {
+        "command": "networkInterceptor.stopCapture",
+        "title": "Stop Capture",
+        "category": "Network Interceptor"
+      },
+      {
         "command": "networkInterceptor.manualInject",
         "title": "Manual Inject Interceptor",
         "category": "Network Interceptor"
@@ -75,6 +85,12 @@
         },
         {
           "command": "networkInterceptor.toggleAutoCapture"
+        },
+        {
+          "command": "networkInterceptor.startCapture"
+        },
+        {
+          "command": "networkInterceptor.stopCapture"
         },
         {
           "command": "networkInterceptor.manualInject"
@@ -109,7 +125,7 @@
         "networkInterceptor.autoCapture": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically capture network requests when debugging starts"
+          "description": "Automatically inject interceptor when debugging starts (requires manual Start Capture command to begin logging)"
         },
         "networkInterceptor.maxRequests": {
           "type": "number",

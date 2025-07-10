@@ -67,9 +67,9 @@ async function showWelcomeMessage(
   const action = await vscode.window.showInformationMessage(
     'Welcome to Network Interceptor! 🌐\n\n' +
       'This extension captures HTTP/HTTPS requests during Node.js debugging sessions. ' +
-      'Start debugging a Node.js application to begin monitoring network traffic.',
+      'Start debugging your Node.js application, then use "Start Capture" command to begin monitoring network traffic.',
     'Open Panel',
-    'Show Documentation',
+    'Start Capture',
     "Don't Show Again"
   );
 
@@ -78,12 +78,8 @@ async function showWelcomeMessage(
       await vscode.commands.executeCommand('networkInterceptor.showPanel');
       break;
 
-    case 'Show Documentation':
-      await vscode.env.openExternal(
-        vscode.Uri.parse(
-          'https://github.com/your-username/vscode-network-interceptor#readme'
-        )
-      );
+    case 'Start Capture':
+      await vscode.commands.executeCommand('networkInterceptor.startCapture');
       break;
 
     case "Don't Show Again":

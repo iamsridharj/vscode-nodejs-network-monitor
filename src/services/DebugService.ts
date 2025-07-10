@@ -343,6 +343,9 @@ export class DebugService implements IDebugService {
         this.logger.info(
           `⚡ Auto-injection triggered for: ${session.name} (score-based selection)`
         );
+        this.logger.info(
+          `ℹ️  Note: Interceptor injected but capture is stopped. Use 'Start Capture' command to begin logging.`
+        );
         this.autoInjectInterceptor(session.id);
       } else {
         this.logger.debug(
@@ -511,7 +514,11 @@ export class DebugService implements IDebugService {
 
       this.networkService.handleNetworkEvent(eventWithSession);
     } catch (error) {
-      this.logger.debug('Failed to parse network event', { output, error });
+      this.logger.warn('Failed to parse network event', {
+        sessionId,
+        output: output.substring(0, 200) + '...', // Truncate long output
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   }
 

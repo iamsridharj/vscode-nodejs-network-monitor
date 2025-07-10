@@ -18,6 +18,7 @@ export class ExtensionController implements NetworkEventHandler {
   private readonly configService = ConfigService.getInstance();
   private readonly logger = LoggerService.getInstance();
   private readonly disposables: vscode.Disposable[] = [];
+  private statusBarItem: vscode.StatusBarItem | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.initialize();
@@ -37,11 +38,8 @@ export class ExtensionController implements NetworkEventHandler {
     this.registerCommands();
     this.setupStatusBar();
 
-    // Auto-start capture based on configuration
-    const config = this.configService.getConfig();
-    if (config.autoCapture) {
-      this.networkService.startCapture();
-    }
+    // Note: Network capture now requires manual start/stop commands
+    // This reduces background processing and gives users better control
 
     this.logger.info('Extension initialized successfully');
   }
@@ -77,6 +75,18 @@ export class ExtensionController implements NetworkEventHandler {
       () => this.handleToggleCapture()
     );
 
+    // Start capture command
+    const startCaptureCmd = vscode.commands.registerCommand(
+      'networkInterceptor.startCapture',
+      () => this.handleStartCapture()
+    );
+
+    // Stop capture command
+    const stopCaptureCmd = vscode.commands.registerCommand(
+      'networkInterceptor.stopCapture',
+      () => this.handleStopCapture()
+    );
+
     // Show logs command
     const showLogsCmd = vscode.commands.registerCommand(
       'networkInterceptor.showLogs',
@@ -107,6 +117,8 @@ export class ExtensionController implements NetworkEventHandler {
       exportCmd,
       toggleCaptureCmd,
       toggleCmd,
+      startCaptureCmd,
+      stopCaptureCmd,
       showLogsCmd,
       manualInjectCmd,
       forceInjectCmd,
@@ -117,34 +129,36 @@ export class ExtensionController implements NetworkEventHandler {
   }
 
   private setupStatusBar(): void {
-    const statusBarItem = vscode.window.createStatusBarItem(
+    this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       100
     );
 
-    statusBarItem.command = 'networkInterceptor.showPanel';
-    this.updateStatusBar(statusBarItem);
+    this.statusBarItem.command = 'networkInterceptor.showPanel';
+    this.updateStatusBar();
 
     // Update status bar when requests change
     this.networkService.addEventHandler({
-      onRequest: () => this.updateStatusBar(statusBarItem),
-      onResponse: () => this.updateStatusBar(statusBarItem),
-      onError: () => this.updateStatusBar(statusBarItem),
+      onRequest: () => this.updateStatusBar(),
+      onResponse: () => this.updateStatusBar(),
+      onError: () => this.updateStatusBar(),
     });
 
-    statusBarItem.show();
-    this.disposables.push(statusBarItem);
+    this.statusBarItem.show();
+    this.disposables.push(this.statusBarItem);
   }
 
-  private updateStatusBar(statusBarItem: vscode.StatusBarItem): void {
+  private updateStatusBar(): void {
+    if (!this.statusBarItem) return;
+
     const requestCount = this.networkService.requests.length;
     const isCapturing = this.networkService.isCapturing;
 
     const icon = isCapturing ? '$(pulse)' : '$(circle-outline)';
-    const status = isCapturing ? 'Capturing' : 'Paused';
+    const status = isCapturing ? 'Capturing' : 'Stopped';
 
-    statusBarItem.text = `${icon} Network: ${requestCount} (${status})`;
-    statusBarItem.tooltip = `Network Interceptor - ${requestCount} requests captured\nClick to open panel`;
+    this.statusBarItem.text = `${icon} Network: ${requestCount} (${status})`;
+    this.statusBarItem.tooltip = `Network Interceptor - ${requestCount} requests captured\nStatus: ${status}\nClick to open panel`;
   }
 
   private setupWebviewMessageHandling(): void {
@@ -169,12 +183,8 @@ export class ExtensionController implements NetworkEventHandler {
   private setupConfigurationHandling(): void {
     this.configService.onConfigChange((config) => {
       this.logger.info('Configuration changed', config);
-
-      if (config.autoCapture && !this.networkService.isCapturing) {
-        this.networkService.startCapture();
-      } else if (!config.autoCapture && this.networkService.isCapturing) {
-        this.networkService.stopCapture();
-      }
+      // Note: Manual capture control - users must explicitly start/stop capture
+      // This change reduces background processing and gives users better control
     });
   }
 
@@ -307,11 +317,62 @@ export class ExtensionController implements NetworkEventHandler {
   private handleToggleCapture(): void {
     if (this.networkService.isCapturing) {
       this.networkService.stopCapture();
+      this.updateStatusBar(); // Update status bar to reflect capture state
       vscode.window.showInformationMessage('Network capture stopped');
     } else {
       this.networkService.startCapture();
+      this.updateStatusBar(); // Update status bar to reflect capture state
       vscode.window.showInformationMessage('Network capture started');
     }
+  }
+
+  private handleStartCapture(): void {
+    if (this.networkService.isCapturing) {
+      vscode.window.showInformationMessage(
+        'Network capture is already running'
+      );
+      return;
+    }
+
+    this.networkService.startCapture();
+    this.updateStatusBar(); // Update status bar to reflect capture state
+    this.logger.info('🚀 Network capture started by user command');
+
+    vscode.window
+      .showInformationMessage(
+        'Network capture started - API calls will now be logged',
+        'Show Panel'
+      )
+      .then((action) => {
+        if (action === 'Show Panel') {
+          this.handleShowPanel();
+        }
+      });
+  }
+
+  private handleStopCapture(): void {
+    if (!this.networkService.isCapturing) {
+      vscode.window.showInformationMessage(
+        'Network capture is already stopped'
+      );
+      return;
+    }
+
+    this.networkService.stopCapture();
+    this.updateStatusBar(); // Update status bar to reflect capture state
+    this.logger.info('⏹️ Network capture stopped by user command');
+
+    const requestCount = this.networkService.requests.length;
+    vscode.window
+      .showInformationMessage(
+        `Network capture stopped - ${requestCount} requests captured`,
+        'Show Panel'
+      )
+      .then((action) => {
+        if (action === 'Show Panel') {
+          this.handleShowPanel();
+        }
+      });
   }
 
   private async handleManualInject(): Promise<void> {

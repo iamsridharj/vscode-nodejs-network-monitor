@@ -151,7 +151,12 @@ export class NetworkService implements INetworkService {
     };
 
     this._requests.set(event.id, request);
-    this.logger.debug(`Request captured: ${event.method} ${event.url}`);
+    this.logger.info(`🚀 Request: ${event.method} ${event.url}`);
+
+    // Log request details if body is present
+    if (captureBody && event.body) {
+      this.logger.info(`📤 Request body: ${JSON.stringify(event.body)}`);
+    }
 
     this.eventHandlers.forEach((handler) => {
       try {
@@ -179,7 +184,25 @@ export class NetworkService implements INetworkService {
     };
 
     this._requests.set(event.id, updatedRequest);
-    this.logger.debug(`Response captured: ${event.status} for ${request.url}`);
+
+    // Enhanced response logging
+    const statusEmoji =
+      event.status && event.status >= 200 && event.status < 300 ? '✅' : '❌';
+    this.logger.info(
+      `${statusEmoji} Response: ${event.status} for ${request.method} ${request.url} (${updatedRequest.duration}ms)`
+    );
+
+    // Log response headers if present
+    if (event.headers && Object.keys(event.headers).length > 0) {
+      this.logger.info(
+        `📨 Response headers: ${JSON.stringify(event.headers, null, 2)}`
+      );
+    }
+
+    // Log response body if present and captured
+    if (captureBody && event.body) {
+      this.logger.info(`📥 Response body: ${JSON.stringify(event.body)}`);
+    }
 
     this.eventHandlers.forEach((handler) => {
       try {
@@ -203,7 +226,9 @@ export class NetworkService implements INetworkService {
     };
 
     this._requests.set(event.id, updatedRequest);
-    this.logger.debug(`Error captured for ${request.url}: ${event.error}`);
+    this.logger.error(
+      `💥 Error for ${request.method} ${request.url}: ${event.error}`
+    );
 
     this.eventHandlers.forEach((handler) => {
       try {
