@@ -221,6 +221,12 @@ export class ExtensionController implements NetworkEventHandler {
   private handleShowPanel(): void {
     this.webviewService.show();
     this.webviewService.updateRequests(this.networkService.requests);
+
+    // Send initial recording state to webview
+    this.webviewService.postMessage({
+      type: 'recordingState',
+      isRecording: this.networkService.isCapturing,
+    });
   }
 
   private handleClearRequests(): void {
@@ -324,6 +330,12 @@ export class ExtensionController implements NetworkEventHandler {
       this.updateStatusBar(); // Update status bar to reflect capture state
       vscode.window.showInformationMessage('Network capture started');
     }
+
+    // Send recording state to webview
+    this.webviewService.postMessage({
+      type: 'recordingState',
+      isRecording: this.networkService.isCapturing,
+    });
   }
 
   private handleStartCapture(): void {
@@ -337,6 +349,12 @@ export class ExtensionController implements NetworkEventHandler {
     this.networkService.startCapture();
     this.updateStatusBar(); // Update status bar to reflect capture state
     this.logger.info('🚀 Network capture started by user command');
+
+    // Send recording state to webview
+    this.webviewService.postMessage({
+      type: 'recordingState',
+      isRecording: true,
+    });
 
     vscode.window
       .showInformationMessage(
@@ -361,6 +379,12 @@ export class ExtensionController implements NetworkEventHandler {
     this.networkService.stopCapture();
     this.updateStatusBar(); // Update status bar to reflect capture state
     this.logger.info('⏹️ Network capture stopped by user command');
+
+    // Send recording state to webview
+    this.webviewService.postMessage({
+      type: 'recordingState',
+      isRecording: false,
+    });
 
     const requestCount = this.networkService.requests.length;
     vscode.window
@@ -537,6 +561,14 @@ export class ExtensionController implements NetworkEventHandler {
 
       case 'export':
         await this.handleExportRequests();
+        break;
+
+      case 'startRecording':
+        this.handleStartCapture();
+        break;
+
+      case 'stopRecording':
+        this.handleStopCapture();
         break;
 
       case 'filter':

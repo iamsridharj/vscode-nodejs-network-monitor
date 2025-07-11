@@ -56,8 +56,16 @@ export interface InterceptorConfig {
 }
 
 export interface WebviewMessage {
-  readonly type: 'updateRequests' | 'clear' | 'export' | 'filter';
+  readonly type:
+    | 'updateRequests'
+    | 'clear'
+    | 'export'
+    | 'filter'
+    | 'startRecording'
+    | 'stopRecording'
+    | 'recordingState';
   readonly data?: unknown;
+  readonly isRecording?: boolean;
 }
 
 export interface RequestFilter {

@@ -203,6 +203,15 @@ export class WebviewService implements IWebviewService {
         .btn-secondary:hover:not(:disabled) {
             background: var(--vscode-button-secondaryHoverBackground);
         }
+        
+        .btn-danger {
+            background: var(--vscode-testing-iconFailed);
+            color: var(--vscode-button-foreground);
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background: var(--error-color);
+        }
 
         .btn-sm {
             padding: 4px 8px;
@@ -432,7 +441,8 @@ export class WebviewService implements IWebviewService {
 </head>
 <body>
     <div class="toolbar">
-        <button id="clear-btn" class="btn btn-primary">Clear</button>
+        <button id="record-btn" class="btn btn-primary">▶️ Start Recording</button>
+        <button id="clear-btn" class="btn btn-secondary">Clear</button>
         <button id="export-btn" class="btn btn-secondary">Export</button>
         <button id="auto-scroll-btn" class="btn btn-secondary">Auto Scroll: On</button>
         <div class="spacer"></div>
@@ -498,9 +508,11 @@ export class WebviewService implements IWebviewService {
             let requests = [];
             let filteredRequests = [];
             let autoScroll = true;
+            let isRecording = false;
 
             // DOM Elements
             const elements = {
+                recordBtn: document.getElementById('record-btn'),
                 clearBtn: document.getElementById('clear-btn'),
                 exportBtn: document.getElementById('export-btn'),
                 autoScrollBtn: document.getElementById('auto-scroll-btn'),
@@ -520,6 +532,10 @@ export class WebviewService implements IWebviewService {
             // Initialize UI
             function initializeUI() {
                 // Add event listeners with null checks
+                if (elements.recordBtn) {
+                    elements.recordBtn.addEventListener('click', toggleRecording);
+                }
+                
                 if (elements.clearBtn) {
                     elements.clearBtn.addEventListener('click', clearRequests);
                 }
@@ -569,6 +585,29 @@ export class WebviewService implements IWebviewService {
             }
 
             // Event handlers
+            function toggleRecording() {
+                if (isRecording) {
+                    vscode.postMessage({ type: 'stopRecording' });
+                } else {
+                    vscode.postMessage({ type: 'startRecording' });
+                }
+            }
+            
+            function updateRecordingState(recording) {
+                isRecording = recording;
+                if (elements.recordBtn) {
+                    if (isRecording) {
+                        elements.recordBtn.textContent = 'Stop Recording';
+                        elements.recordBtn.classList.remove('btn-primary');
+                        elements.recordBtn.classList.add('btn-danger');
+                    } else {
+                        elements.recordBtn.textContent = 'Start Recording';
+                        elements.recordBtn.classList.remove('btn-danger');
+                        elements.recordBtn.classList.add('btn-primary');
+                    }
+                }
+            }
+            
             function clearRequests() {
                 vscode.postMessage({ type: 'clear' });
                 requests = [];
@@ -886,6 +925,9 @@ export class WebviewService implements IWebviewService {
                         requests = [];
                         filteredRequests = [];
                         updateUI();
+                        break;
+                    case 'recordingState':
+                        updateRecordingState(message.isRecording);
                         break;
                 }
             }
